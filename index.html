@@ -1,0 +1,458 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Space Shooter - 2D Web game</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.js"></script>
+    <style>
+      body {
+        margin: 0;
+        background: black;
+      }
+      canvas {
+        display: block;
+        margin: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      // -------------------- MENU SCENE --------------------
+      class MenuScene extends Phaser.Scene {
+        constructor() {
+          super({ key: "MenuScene" });
+        }
+
+        create() {
+          this.cameras.main.setBackgroundColor("#000000");
+          this.add
+            .text(400, 150, "SPACE SHOOTER", {
+              fontSize: "48px",
+              fill: "#ffffff",
+            })
+            .setOrigin(0.5);
+
+          const startText = this.add
+            .text(400, 300, "START GAME", { fontSize: "32px", fill: "#00ff00" })
+            .setOrigin(0.5)
+            .setInteractive();
+          startText.on("pointerdown", () => this.scene.start("GameScene"));
+
+          const optionsText = this.add
+            .text(400, 400, "OPTIONS", { fontSize: "32px", fill: "#00ff00" })
+            .setOrigin(0.5)
+            .setInteractive();
+          optionsText.on("pointerdown", () => this.scene.start("OptionsScene"));
+
+          this.input.keyboard.on("keydown-SPACE", () =>
+            this.scene.start("GameScene"),
+          );
+        }
+      }
+
+      // -------------------- OPTIONS SCENE --------------------
+      class OptionsScene extends Phaser.Scene {
+        constructor() {
+          super({ key: "OptionsScene" });
+        }
+
+        create() {
+          this.cameras.main.setBackgroundColor("#111111");
+          this.add
+            .text(400, 100, "OPTIONS", { fontSize: "48px", fill: "#ffffff" })
+            .setOrigin(0.5);
+
+          let soundOn = true;
+          const soundText = this.add
+            .text(400, 250, "Sound: ON", { fontSize: "32px", fill: "#00ff00" })
+            .setOrigin(0.5)
+            .setInteractive();
+
+          soundText.on("pointerdown", () => {
+            soundOn = !soundOn;
+            this.sound.mute = !soundOn;
+            soundText.setText("Sound: " + (soundOn ? "ON" : "OFF"));
+          });
+
+          const backText = this.add
+            .text(400, 400, "BACK", { fontSize: "32px", fill: "#00ff00" })
+            .setOrigin(0.5)
+            .setInteractive();
+          backText.on("pointerdown", () => this.scene.start("MenuScene"));
+        }
+      }
+
+      // -------------------- GAME SCENE --------------------
+      class GameScene extends Phaser.Scene {
+        constructor() {
+          super({ key: "GameScene" });
+        }
+
+        preload() {
+          preload.call(this);
+        }
+        create() {
+          create.call(this);
+        }
+        update(time) {
+          update.call(this, time);
+        }
+      }
+
+      // -------------------- PHASER CONFIG --------------------
+      const config = {
+        type: Phaser.AUTO,
+        width: 800,
+        height: 600,
+        physics: { default: "arcade", arcade: { debug: false } },
+        scene: [MenuScene, OptionsScene, GameScene],
+      };
+      new Phaser.Game(config);
+
+      // -------------------- GLOBAL VARIABLES --------------------
+      let player, cursors, bullets, enemies, enemyBullets, bosses, powerUps;
+      let scoreText,
+        score = 0,
+        gameOver = false,
+        lastShot = 0,
+        enemyFireRate = 2000;
+      let rapidFire = false,
+        rapidFireTimer,
+        stars,
+        bossSpawned = false;
+
+      // Postepeno ubrzavanje
+      let speedFactor = 1;
+      let speedIncreaseRate = 0.001;
+
+      // -------------------- PRELOAD --------------------
+      function preload() {
+        this.load.image(
+          "player",
+          "https://labs.phaser.io/assets/sprites/player.png",
+        );
+        this.load.image(
+          "enemy",
+          "https://labs.phaser.io/assets/sprites/ufo.png",
+        );
+        this.load.image(
+          "enemyMan",
+          "https://labs.phaser.io/assets/sprites/phaser-dude.png",
+        );
+        this.load.image(
+          "boss",
+          "https://labs.phaser.io/assets/sprites/ufo.png",
+        );
+        this.load.image(
+          "powerup",
+          "https://labs.phaser.io/assets/sprites/purple_ball.png",
+        );
+        this.load.audio(
+          "shoot",
+          "https://labs.phaser.io/assets/audio/SoundEffects/pistol.wav",
+        );
+        this.load.audio(
+          "explode",
+          "https://labs.phaser.io/assets/audio/SoundEffects/explosion.mp3",
+        );
+      }
+
+      // -------------------- CREATE --------------------
+      function create() {
+        stars = [];
+        for (let i = 0; i < 120; i++) {
+          let star = this.add.rectangle(
+            Phaser.Math.Between(0, 800),
+            Phaser.Math.Between(0, 600),
+            2,
+            2,
+            0xffffff,
+          );
+          stars.push(star);
+        }
+
+        const g1 = this.add.graphics();
+        g1.fillStyle(0x3399ff, 1);
+        g1.fillCircle(6, 6, 6);
+        g1.fillStyle(0xffffff, 1);
+        g1.fillCircle(6, 6, 3);
+        g1.generateTexture("playerBullet", 12, 12);
+        g1.destroy();
+
+        const g2 = this.add.graphics();
+        g2.fillStyle(0xff2222, 1);
+        g2.fillCircle(6, 6, 6);
+        g2.fillStyle(0xffffff, 1);
+        g2.fillCircle(6, 6, 3);
+        g2.generateTexture("enemyBullet", 12, 12);
+        g2.destroy();
+
+        player = this.physics.add
+          .sprite(400, 550, "player")
+          .setCollideWorldBounds(true)
+          .setScale(2.5);
+        cursors = this.input.keyboard.createCursorKeys();
+
+        bullets = this.physics.add.group();
+        enemies = this.physics.add.group();
+        bosses = this.physics.add.group();
+        enemyBullets = this.physics.add.group();
+        powerUps = this.physics.add.group();
+
+        this.input.keyboard.on("keydown-SPACE", () => shoot.call(this));
+
+        this.physics.add.overlap(bullets, enemies, hitEnemy, null, this);
+        this.physics.add.overlap(player, enemies, playerHit, null, this);
+        this.physics.add.overlap(player, enemyBullets, playerHit, null, this);
+        this.physics.add.overlap(player, powerUps, collectPowerUp, null, this);
+        this.physics.add.overlap(bullets, bosses, hitEnemy, null, this);
+
+        scoreText = this.add.text(16, 16, "Score: 0", {
+          fontSize: "28px",
+          fill: "#fff",
+        });
+
+        spawnEnemy.call(this);
+        spawnPowerUp.call(this);
+
+        this.shootSound = this.sound.add("shoot");
+        this.explodeSound = this.sound.add("explode");
+      }
+
+      // -------------------- UPDATE --------------------
+      function update(time) {
+        if (gameOver) return;
+
+        // Postepeno povećavanje brzine
+        speedFactor += speedIncreaseRate;
+
+        stars.forEach((star) => {
+          star.y += 1.5;
+          if (star.y > 600) {
+            star.y = 0;
+            star.x = Phaser.Math.Between(0, 800);
+          }
+        });
+
+        if (cursors.left.isDown) player.setVelocityX(-300);
+        else if (cursors.right.isDown) player.setVelocityX(300);
+        else player.setVelocityX(0);
+
+        if (score >= 500 && !bossSpawned) {
+          spawnBoss.call(this);
+          bossSpawned = true;
+        }
+
+        enemies.children.iterate((enemy) => {
+          if (enemy.active) {
+            if (
+              enemy.type !== "miniUfo" &&
+              (!enemy.lastFired || time > enemy.lastFired + enemyFireRate)
+            ) {
+              shootEnemyBullet.call(this, enemy);
+              enemy.lastFired = time;
+            }
+          }
+        });
+
+        bosses.children.iterate((boss) => {
+          if (boss.active) {
+            boss.x = boss.startX + Math.sin(this.time.now / 1000) * 200;
+            boss.y = boss.startY + Math.sin(this.time.now / 800) * 50;
+            updateBossHealthBar(boss);
+          }
+        });
+
+        enemyFireRate = Math.max(500, 2000 - Math.floor(score / 50) * 100);
+      }
+
+      // -------------------- SHOOT --------------------
+      function shoot() {
+        if (gameOver) return;
+        let timeNow = this.time.now;
+        let fireRate = rapidFire ? 150 : 300;
+        if (timeNow - lastShot < fireRate) return;
+        lastShot = timeNow;
+
+        if (rapidFire) {
+          createBullet(player.x - 10, player.y - 20);
+          createBullet(player.x + 10, player.y - 20);
+        } else createBullet(player.x, player.y - 20);
+        this.shootSound.play();
+      }
+      function createBullet(x, y) {
+        const bullet = bullets.create(x, y, "playerBullet");
+        bullet.setVelocityY(-500);
+        bullet.setScale(1.5);
+      }
+      function shootEnemyBullet(enemy) {
+        const bullet = enemyBullets.create(
+          enemy.x,
+          enemy.y + 20,
+          "enemyBullet",
+        );
+        bullet.setVelocityY(350);
+        bullet.setScale(1.5);
+      }
+
+      // -------------------- SPAWN ENEMIES --------------------
+      function spawnEnemy() {
+        if (gameOver || bossSpawned) return;
+        const numEnemies = Phaser.Math.Between(2, 4);
+        for (let i = 0; i < numEnemies; i++) {
+          const x = Phaser.Math.Between(50, 750);
+          let type = Phaser.Math.Between(1, 2);
+          let enemySprite = type === 1 ? "enemy" : "enemyMan";
+          const enemy = enemies.create(x, 0, enemySprite);
+
+          if (type === 1) {
+            enemy.setScale(1.5);
+            enemy.setVelocityY(200 * speedFactor);
+            enemy.type = "ufo";
+          } else {
+            enemy.setScale(0.8);
+            enemy.setVelocityY(250 * speedFactor);
+            enemy.type = "man";
+          }
+          enemy.lastFired = 0;
+        }
+        this.time.addEvent({
+          delay: Phaser.Math.Between(500, 1000),
+          callback: () => spawnEnemy.call(this),
+          loop: false,
+        });
+      }
+
+      // -------------------- HIT ENEMY --------------------
+      function hitEnemy(bullet, enemy) {
+        bullet.disableBody(true, true);
+
+        if (enemy.type === "boss") {
+          enemy.health -= 1;
+          if (enemy.health <= 0) {
+            enemy.disableBody(true, true);
+            enemy.healthBar.destroy();
+            this.explodeSound.play();
+            gameOver = true;
+            const winText = this.add
+              .text(400, 250, "YOU WIN!", { fontSize: "48px", fill: "#00ff00" })
+              .setOrigin(0.5);
+          }
+        } else {
+          this.explodeSound.play();
+          score += 10;
+          scoreText.setText("Score: " + score);
+
+          if (enemy.type === "ufo") {
+            for (let i = 0; i < 2; i++) {
+              const mini = enemies.create(
+                enemy.x + (i === 0 ? -20 : 20),
+                enemy.y,
+                "enemy",
+              );
+              mini.setScale(0.8);
+              mini.setVelocityY(Phaser.Math.Between(200, 300) * speedFactor);
+              mini.type = "miniUfo";
+              mini.lastFired = 0;
+            }
+          }
+
+          enemy.disableBody(true, true);
+        }
+      }
+
+      // -------------------- PLAYER HIT --------------------
+      function playerHit(player, obj) {
+        obj.disableBody(true, true);
+        player.setTint(0xff0000);
+        gameOver = true;
+
+        const gameOverText = this.add
+          .text(400, 250, "GAME OVER", { fontSize: "48px", fill: "#ff0000" })
+          .setOrigin(0.5);
+
+        const restartText = this.add
+          .text(400, 350, "RESTART", { fontSize: "32px", fill: "#00ff00" })
+          .setOrigin(0.5)
+          .setInteractive();
+
+        restartText.on("pointerdown", () => {
+          this.scene.restart();
+          score = 0;
+          gameOver = false;
+          bossSpawned = false;
+          rapidFire = false;
+          speedFactor = 1;
+        });
+      }
+
+      // -------------------- POWERUPS --------------------
+      function spawnPowerUp() {
+        if (gameOver) return;
+        const x = Phaser.Math.Between(50, 750);
+        const powerUp = powerUps.create(x, 0, "powerup");
+        powerUp.setVelocityY(150 * speedFactor);
+        powerUp.setScale(2);
+        this.time.addEvent({
+          delay: Phaser.Math.Between(8000, 12000),
+          callback: () => spawnPowerUp.call(this),
+          loop: false,
+        });
+      }
+      function collectPowerUp(player, powerUp) {
+        powerUp.disableBody(true, true);
+        rapidFire = true;
+        if (rapidFireTimer) rapidFireTimer.remove(false);
+        rapidFireTimer = player.scene.time.addEvent({
+          delay: 10000,
+          callback: () => (rapidFire = false),
+        });
+      }
+
+      // -------------------- BOSS --------------------
+      function spawnBoss() {
+        const boss = bosses.create(400, 150, "boss");
+        boss.setScale(4);
+        boss.type = "boss";
+        boss.maxHealth = 10;
+        boss.health = boss.maxHealth;
+        boss.startX = boss.x;
+        boss.startY = boss.y;
+
+        boss.healthBar = this.add.graphics();
+
+        enemies.clear(true, true);
+
+        this.time.addEvent({
+          delay: 1000,
+          loop: true,
+          callback: () => {
+            if (boss.active) shootEnemyBullet.call(this, boss);
+          },
+        });
+      }
+
+      // -------------------- HEALTH BAR --------------------
+      function updateBossHealthBar(boss) {
+        if (!boss.active) return;
+        boss.healthBar.clear();
+
+        boss.healthBar.fillStyle(0x000000, 1);
+        boss.healthBar.fillRect(
+          boss.x - 102,
+          boss.y - boss.displayHeight / 2 - 16,
+          204,
+          24,
+        );
+
+        boss.healthBar.fillStyle(0xff0000, 1);
+        boss.healthBar.fillRect(
+          boss.x - 100,
+          boss.y - boss.displayHeight / 2 - 14,
+          200 * (boss.health / boss.maxHealth),
+          20,
+        );
+      }
+    </script>
+  </body>
+</html>
